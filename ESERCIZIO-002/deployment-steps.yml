@@ -1,0 +1,208 @@
+# Template per i deployment steps (salvare come deployment-steps.yml)
+parameters:
+  - name: environmentName
+    type: string
+  - name: targetMachine
+    type: string
+  - name: deploymentPath
+    type: string
+
+steps:
+  # Download degli artifact
+  - task: DownloadBuildArtifacts@0
+    displayName: 'Download Build Artifacts'
+    inputs:
+      buildType: 'current'
+      downloadType: 'single'
+      artifactName: $(artifactName)
+      downloadPath: '$(System.ArtifactsDirectory)'
+  
+  # Backup dell'applicazione corrente
+  - task: PowerShell@2
+    displayName: 'Backup Current Application'
+    inputs:
+      targetType: 'inline'
+      script: |
+        $backupPath = "${{ parameters.deploymentPath }}_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        if (Test-Path "${{ parameters.deploymentPath }}") {
+          Write-Host "Creating backup at: $backupPath"
+          Copy-Item -Path "${{ parameters.deploymentPath }}" -Destination $backupPath -Recurse -Force
+        }
+        
+        # Mantieni solo gli ultimi 5 backup
+        Get-ChildItem -Path "$(Split-Path '${{ parameters.deploymentPath }}' -Parent)" -Directory | 
+        Where-Object { $_.Name -like "*_backup_*" } | 
+        Sort-Object CreationTime -Descending | 
+        Select-Object -Skip 5 | 
+        Remove-Item -Recurse -Force
+  
+  # Stop dell'applicazione/servizio
+  - task: PowerShell@2
+    displayName: 'Stop Application Services'
+    inputs:
+      targetType: 'inline'
+      script: |
+        # Stop IIS Application Pool se applicabile
+        $appPoolName = "$(appName)AppPool"
+        if (Get-IISAppPool -Name $appPoolName -ErrorAction SilentlyContinue) {
+          Write-Host "Stopping IIS Application Pool: $appPoolName"
+          Stop-WebAppPool -Name $appPoolName
+        }
+        
+        # Stop Windows Service se applicabile
+        $serviceName = "$(appName)Service"
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -eq 'Running') {
+          Write-Host "Stopping Windows Service: $serviceName"
+          Stop-Service -Name $serviceName -Force
+        }
+  
+  # Deployment dell'applicazione
+  - task: CopyFiles@2
+    displayName: 'Deploy Application Files'
+    inputs:
+      SourceFolder: '$(System.ArtifactsDirectory)/$(artifactName)/$(appName)'
+      Contents: '**'
+      TargetFolder: '${{ parameters.deploymentPath }}'
+      CleanTargetFolder: true
+      OverWrite: true
+  
+  # Configurazione dell'ambiente
+  - task: PowerShell@2
+    displayName: 'Configure Application'
+    inputs:
+      targetType: 'inline'
+      script: |
+        # Aggiorna appsettings.json con le variabili dell'ambiente
+        $appSettingsPath = "${{ parameters.deploymentPath }}/appsettings.json"
+        if (Test-Path $appSettingsPath) {
+          $appSettings = Get-Content $appSettingsPath -Raw | ConvertFrom-Json
+          
+          # Aggiorna connection string se disponibile
+          if ($env:DATABASE_CONNECTION_STRING) {
+            $appSettings.ConnectionStrings.DefaultConnection = $env:DATABASE_CONNECTION_STRING
+          }
+          
+          # Aggiorna altre configurazioni
+          if ($env:APP_ENVIRONMENT) {
+            $appSettings.Environment = $env:APP_ENVIRONMENT
+          }
+          
+          # Salva le modifiche
+          $appSettings | ConvertTo-Json -Depth 100 | Set-Content $appSettingsPath
+          Write-Host "Application configuration updated"
+        }
+  
+  # Esecuzione delle migrazioni del database
+  - task: PowerShell@2
+    displayName: 'Run Database Migrations'
+    inputs:
+      targetType: 'inline'
+      script: |
+        $migrationTool = "${{ parameters.deploymentPath }}/$(appName).exe"
+        if (Test-Path $migrationTool) {
+          Write-Host "Running database migrations..."
+          & $migrationTool --migrate --environment=${{ parameters.environmentName }}
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Database migration failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+        }
+    condition: and(succeeded(), ne(variables['SKIP_MIGRATIONS'], 'true'))
+  
+  # Configurazione IIS (se necessario)
+  - task: PowerShell@2
+    displayName: 'Configure IIS'
+    inputs:
+      targetType: 'inline'
+      script: |
+        Import-Module WebAdministration
+        
+        $siteName = "$(appName)"
+        $appPoolName = "$(appName)AppPool"
+        $physicalPath = "${{ parameters.deploymentPath }}"
+        
+        # Crea Application Pool se non esiste
+        if (!(Get-IISAppPool -Name $appPoolName -ErrorAction SilentlyContinue)) {
+          Write-Host "Creating IIS Application Pool: $appPoolName"
+          New-WebAppPool -Name $appPoolName -Force
+          Set-ItemProperty -Path "IIS:\AppPools\$appPoolName" -Name processModel.identityType -Value ApplicationPoolIdentity
+          Set-ItemProperty -Path "IIS:\AppPools\$appPoolName" -Name managedRuntimeVersion -Value ""
+        }
+        
+        # Crea sito web se non esiste
+        if (!(Get-Website -Name $siteName -ErrorAction SilentlyContinue)) {
+          Write-Host "Creating IIS Website: $siteName"
+          New-Website -Name $siteName -Port 80 -PhysicalPath $physicalPath -ApplicationPool $appPoolName
+        } else {
+          Write-Host "Updating IIS Website: $siteName"
+          Set-ItemProperty -Path "IIS:\Sites\$siteName" -Name physicalPath -Value $physicalPath
+        }
+    condition: and(succeeded(), eq(variables['DEPLOY_TO_IIS'], 'true'))
+  
+  # Start dell'applicazione
+  - task: PowerShell@2
+    displayName: 'Start Application Services'
+    inputs:
+      targetType: 'inline'
+      script: |
+        # Start IIS Application Pool
+        $appPoolName = "$(appName)AppPool"
+        if (Get-IISAppPool -Name $appPoolName -ErrorAction SilentlyContinue) {
+          Write-Host "Starting IIS Application Pool: $appPoolName"
+          Start-WebAppPool -Name $appPoolName
+        }
+        
+        # Start Windows Service
+        $serviceName = "$(appName)Service"
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if ($service) {
+          Write-Host "Starting Windows Service: $serviceName"
+          Start-Service -Name $serviceName
+        }
+  
+  # Health check dell'applicazione
+  - task: PowerShell@2
+    displayName: 'Application Health Check'
+    inputs:
+      targetType: 'inline'
+      script: |
+        $healthCheckUrl = "$(APP_BASE_URL)/health"
+        $maxRetries = 10
+        $retryDelay = 30
+        
+        Write-Host "Performing health check on: $healthCheckUrl"
+        
+        for ($i = 1; $i -le $maxRetries; $i++) {
+          try {
+            $response = Invoke-RestMethod -Uri $healthCheckUrl -Method GET -TimeoutSec 30
+            if ($response.Status -eq "Healthy") {
+              Write-Host "✅ Health check passed on attempt $i"
+              exit 0
+            }
+          } catch {
+            Write-Warning "❌ Health check failed on attempt $i : $($_.Exception.Message)"
+          }
+          
+          if ($i -lt $maxRetries) {
+            Write-Host "⏳ Waiting $retryDelay seconds before retry..."
+            Start-Sleep -Seconds $retryDelay
+          }
+        }
+        
+        Write-Error "❌ Health check failed after $maxRetries attempts"
+        exit 1
+    condition: and(succeeded(), ne(variables['SKIP_HEALTH_CHECK'], 'true'))
+
+  # Notifica di successo
+  - task: PowerShell@2
+    displayName: 'Send Success Notification'
+    inputs:
+      targetType: 'inline'
+      script: |
+        Write-Host "🎉 Deployment to ${{ parameters.environmentName }} completed successfully!"
+        Write-Host "Application URL: $(APP_BASE_URL)"
+        Write-Host "Deployment Path: ${{ parameters.deploymentPath }}"
+        Write-Host "Build Number: $(Build.BuildNumber)"
+        Write-Host "Commit: $(Build.SourceVersion)"
+    condition: succeeded()

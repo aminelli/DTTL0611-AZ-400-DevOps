@@ -1,0 +1,138 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "baseName": {
+            "type": "string",
+            "defaultValue": "[toLower(concat('crs-', uniqueString(resourceGroup().id)))]",
+            "maxLength": 20,
+            "minLength": 3,
+            "metadata": {
+                "description": "The base name to use as prefix to create all the resources."
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "northeurope",
+            "metadata": {
+                "description": "Specifies the location for all resources."
+            }
+        },
+        "resourceGroupName": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().name]",
+            "metadata": {
+                "description": "Specifies the group name for all resources."
+            }
+        },
+        "gitHubAccount": {
+            "type": "string",
+            "defaultValue": "aminelli",
+            "metadata": {
+                "description": "Git Account Name"
+            }
+        },
+        "gitHubRepo": {
+            "type": "string",
+            "defaultValue": "ADF",
+            "metadata": {
+                "description": "Git Repo"
+            }
+        },
+        "utcValue": {
+            "type": "string",
+            "defaultValue": "[utcNow()]"
+        }
+        
+    },
+    "functions": [],
+    "variables": {
+        "resourceGroupNameManaged": "[concat(parameters('resourceGroupName'),'-mngd-', uniqueString(parameters('utcValue')))]",
+        "trimmedMRGName": "[substring(variables('resourceGroupNameManaged'), 0, min(length(variables('resourceGroupNameManaged')), 90))]",
+        "managedResourceGroupId": "[concat(subscription().id, '/resourceGroups/', variables('trimmedMRGName'))]",
+        "databricksWorkspace" : "[concat('adb-', parameters('baseName'), '-', uniqueString(parameters('utcValue')))]",
+        "serviceAccuntBlobName": "[concat('sablob', uniqueString(parameters('utcValue')))]"
+    },
+    "resources": [
+        {
+            "apiVersion": "2023-02-01",
+            "location": "[parameters('location')]",
+            "name": "[variables('databricksWorkspace')]",
+            "sku": {
+                "name": "standard"
+            },
+            "comments": "Please do not use an existing resource group for ManagedResourceGroupId.",
+            "properties": {
+                "ManagedResourceGroupId": "[variables('managedResourceGroupId')]",
+                "parameters": {}
+            },
+            "type": "Microsoft.Databricks/workspaces",
+            "dependsOn": [],
+            "tags": {}
+        },        
+        {
+            "name": "[variables('serviceAccuntBlobName')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2022-09-01",
+            "location": "[parameters('location')]",
+            "properties": {
+                "accessTier": "Hot"
+            },
+            "dependsOn": [],
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "kind": "StorageV2",
+            "tags": {}
+        },
+        {
+            "name": "[concat(variables('serviceAccuntBlobName'), '/default')]",
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2022-09-01",
+            "properties": {
+                "restorePolicy": {
+                    "enabled": false
+                },
+                "deleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 7
+                },
+                "containerDeleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 7
+                },
+                "changeFeed": {
+                    "enabled": false
+                },
+                "isVersioningEnabled": false
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('serviceAccuntBlobName'))]"
+            ]
+        },
+        {
+            "name": "[concat(variables('serviceAccuntBlobName'), '/default')]",
+            "type": "Microsoft.Storage/storageAccounts/fileservices",
+            "apiVersion": "2022-09-01",
+            "properties": {
+                "shareDeleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 7
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('serviceAccuntBlobName'))]",
+                "[concat(concat('Microsoft.Storage/storageAccounts/', variables('serviceAccuntBlobName')), '/blobServices/default')]"
+            ]
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2022-05-01",
+            "name": "[format('{0}/default/{1}', variables('serviceAccuntBlobName'), 'datasets')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('serviceAccuntBlobName'))]"
+            ]
+        }
+    ],
+    "outputs": {}
+}

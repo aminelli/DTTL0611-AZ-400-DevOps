@@ -1,0 +1,108 @@
+# Trigger Intercettazione Push
+trigger:
+  branches:
+    include:
+    - master
+  paths:
+    include:
+    - IaC/arm-templates/*
+
+
+# Trigger Intercettazione Pull
+pr:
+  branches:
+    include:
+    - master
+  paths:
+    include:
+    - IaC/arm-templates/*
+
+# Macchina su cui eseguire le pipeline
+pool:
+  vmImage: ubuntu-latest
+
+
+# Variabili del template. Variabili da dichiarare nel file delle variabili in devops
+# 
+
+variables:
+  - group: vars-group-adb-test
+
+steps:
+  
+  - task: AzureResourceGroupDeployment@2
+    displayName: "Provisioning delle risorse su Azure"
+    inputs:
+      action: "Create Or Update Resource Group"
+      deploymentMode: "Incremental"
+      templateLocation: "Linked artifact"
+      azureSubscription: "$(SRV_CONN_NAME)"
+      resourceGroupName: "$(RESOURCE_GROUP_NAME)"
+      location: $(LOCATION)
+      csmFile: "$(Build.SourcesDirectory)/IaC/arm-templates/azure-create-cloud-environment.json"
+      overrideParameters: "-baseName $(BASE_NAME) -location $(LOCATION) -gitHubAccount $(GITHUB_ACCOUNT) -gitHubRepo $(GITHUB_REPO)"
+
+  - task: AzureCLI@1
+    name: 'createDatabricksCluster'
+    displayName: 'Create Databricks Cluster'
+    inputs:
+      azureSubscription: '$(SRV_CONN_NAME)'
+      scriptLocation: inlineScript
+      workingDirectory: $(Build.SourcesDirectory)
+      arguments: '$(RESOURCE_GROUP_NAME)'
+      inlineScript: |
+        set -e # fail on error
+        export SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        export TENANT_ID=$(az account show --query tenantId -o tsv)
+        
+        echo "=== SUBSCRIPTION ID ==="
+        echo $SUBSCRIPTION_ID
+        echo "=== TENANT ID ==="
+        echo $TENANT_ID
+        
+        echo "=== INSTALL OR UPDATE databricks-cli ==="        
+        pip install databricks-cli --no-input
+        pip install databricks-cli --upgrade --no-input
+        databricks --version
+        
+        echo "=== DATABRICKS AAD TOKEN ==="
+        export DATABRICKS_AAD_TOKEN=$(az account get-access-token --resource 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d --query "accessToken" -o tsv)
+        echo $DATABRICKS_AAD_TOKEN
+        
+        echo "=== RESOURCE GROUP NAME ==="
+        export RESOURCE_GROUP_NAME=$1
+        echo $RESOURCE_GROUP_NAME
+        
+        echo "=== WRK Lists ==="
+        az databricks workspace list
+        
+        echo "=== ADB WORKSPACE NAME ==="
+        export ADB_WORKSPACE_NAME=$(az databricks workspace list --query "[?resourceGroup=='${RESOURCE_GROUP_NAME}'].name | [0]" -o tsv)
+        echo $ADB_WORKSPACE_NAME
+
+
+        echo "=== ADB WORKSPACE URL ==="
+        export ADB_WORKSPACE_URL=$(az databricks workspace list --query "[?resourceGroup=='${RESOURCE_GROUP_NAME}'].workspaceUrl | [0]" -o tsv)
+        echo $ADB_WORKSPACE_URL
+
+        echo "=== CONFIGURE ADB WRK CONNECTION ==="
+        databricks configure --aad-token --host "https://${ADB_WORKSPACE_URL}"
+
+        echo "=== APPLY TEMPLATE ==="
+        cat ./IaC/arm-templates/databricks-create-cluster.json
+        echo "  "
+
+        echo "=== CREATE ADB WRK CLUSTER ==="
+        databricks clusters create --json-file ./IaC/arm-templates/databricks-create-cluster.json
+
+        echo "=== ADB WRK CLUSTER DATA ==="
+        databricks clusters get --cluster-name "spark cluster test" 
+        
+        
+
+
+
+
+
+
+

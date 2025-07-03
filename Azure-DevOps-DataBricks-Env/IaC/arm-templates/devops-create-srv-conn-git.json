@@ -1,0 +1,13 @@
+{
+    "name": "github",
+    "type": "GitHub",
+    "url": "https://github.com",
+    "isShared": false,
+    "isReady": true,
+    "authorization": {
+        "parameters": {
+            "AccessToken": "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"
+        },
+        "scheme": "Token"
+    }
+}

@@ -1,0 +1,43 @@
+# Trigger Intercettazione Push
+trigger:
+  branches:
+    include:
+    - master
+  paths:
+    include:
+    - IaC/arm-templates/*
+
+
+# Trigger Intercettazione Pull
+pr:
+  branches:
+    include:
+    - master
+  paths:
+    include:
+    - IaC/arm-templates/*
+
+# Macchina su cui eseguire le pipeline
+pool:
+  vmImage: ubuntu-latest
+
+# Variabili del template. Variabili da dichiarare nel file delle variabili in devops
+# 
+
+variables:
+  - group: vars-group-adb-test
+
+steps:
+  - task: AzureCLI@1
+    name: 'getpipelineid'
+    displayName: 'Get Pipeline ID'
+    inputs:
+      azureSubscription: '$(WORKSPACE_SVC_CONNECTION)'
+      scriptLocation: inlineScript
+      workingDirectory: $(Build.SourcesDirectory)
+      inlineScript: |
+        set -e # fail on error
+        export SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        export TENANT_ID=$(az account show --query tenantId -o tsv)
+        echo SUBSCRIPTION_ID
+        echo TENANT_ID

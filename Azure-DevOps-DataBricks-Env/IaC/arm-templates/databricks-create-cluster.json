@@ -1,0 +1,16 @@
+{
+    "cluster_name": "spark cluster test",
+    "spark_version": "12.2.x-scala2.12",
+    "node_type_id": "Standard_DS3_v2",
+    "driver_node_type_id": "Standard_DS3_v2",
+    "num_workers": 2,
+    "autotermination_minutes": 30,
+    "enable_elastic_disk": true,
+    "enable_local_disk_encryption": false,
+    "spark_conf": {
+        "spark.speculation": true
+    },
+    "spark_env_vars": {
+        "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+    }
+}

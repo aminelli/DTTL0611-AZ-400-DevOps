@@ -1,0 +1,21 @@
+# Pipeline that removes the resources created by the IaC Create Environment pipeline.
+pr: none
+trigger: none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+- group: vars-group-adb-test
+
+
+steps:
+- task: AzureResourceGroupDeployment@2
+  displayName: 'Eliminazione delle risorse in Azure'
+  inputs:
+    azureSubscription: '$(SRV_CONN_NAME)'
+    action: 'DeleteRG'
+    resourceGroupName: '$(RESOURCE_GROUP_NAME)'
+    location: $(LOCATION)
+
+  

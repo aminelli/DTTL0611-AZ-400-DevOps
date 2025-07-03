@@ -1,0 +1,20 @@
+{
+    "name": "svc-conn-rg-adf-test",
+    "type": "azurerm",
+    "url": "https://management.azure.com/",
+    "isShared": false,
+    "isReady": true,
+    "authorization": {
+        "parameters": {
+            "tenantid": "6c7d8b3b-8c71-4013-be58-e78af03cde75"
+        },
+        "scheme": "ServicePrincipal"
+    },
+    "data": {
+        "creationMode": "Automatic",
+        "environment": "AzureCloud",
+        "scopeLevel": "Subscription",
+        "subscriptionId": "8855b22a-640a-41db-bdc5-b423cb3e8feb",
+        "subscriptionName": "Pagamento in base al consumo"
+    }
+}
