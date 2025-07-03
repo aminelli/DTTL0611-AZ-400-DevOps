@@ -112,7 +112,7 @@ $GITHUB_USER                     = "aminelli"
 $GITHUB_REPO_NAME                = "Azure-DevOps-DataBricks-Env"
 $GITHUB_REPO_NAME_EXT            = $GITHUB_USER + "/Azure-DevOps-DataBricks-Env"
 $GITHUB_REPO_URL                 = "https://github.com/aminelli/Azure-DevOps-DataBricks-Env"
-$GITHUB_TOKEN                    = "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"
+$GITHUB_TOKEN                    = "ghp_"
 $env:AZURE_DEVOPS_EXT_GITHUB_PAT = $GITHUB_TOKEN
 
 
